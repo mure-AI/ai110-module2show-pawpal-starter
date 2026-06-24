@@ -1,11 +1,15 @@
 # PawPal+ Project Reflection
 
 ## 1. System Design
+• Add a pet with a name
+• Add actions needed to be taken on each pet (feeding, walks, medication appointment) and the time constraints or frequency
+• View schedule for the day
 
 **a. Initial design**
 
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
+- ANSWER:the classes i plan to include are
 
 **b. Design changes**
 

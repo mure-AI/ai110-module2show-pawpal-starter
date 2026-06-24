@@ -1,15 +1,46 @@
 classDiagram
-    %% Replace the placeholders below with your actual classes, attributes, methods, and relationships.
+     %% Replace the placeholders below with your actual classes, attributes, methods, and relationships.
     %% Keep this file updated so it matches your final implementation.
 
-    class ClassName {
-        +type attribute
-        +method() returnType
+    class User {
+        +str name
+        +list~Pet~ pets
+        +Schedule schedule
+        +add_pet(pet) None
+        +add_constraint(constraint) None
+        +add_preference(preference) None
+        +add_activity(pet, activity) None
     }
 
-    class AnotherClass {
-        +type attribute
-        +method() returnType
+    class Pet {
+        +str name
+        +list~Activity~ activities
+        +display_schedule() None
+        +add_activity(activity) None
     }
 
-    ClassName --> AnotherClass : relationship
+    class Schedule {
+        +date day
+        +list~Activity~ activities
+        +add_activity(activity) None
+        +prioritize() list~Activity~
+        +build_daily_view() str
+        +resolve_conflicts() None
+    }
+
+    class Activity {
+        +str name
+        +Pet pet
+        +int priority
+        +time start_time
+        +int duration_minutes
+        +str category
+        +time earliest
+        +time latest
+        +bool is_fixed
+    }
+
+    User "1" --> "*" Pet : owns
+    User "1" --> "1" Schedule : maintains
+    Pet "1" --> "*" Activity : has
+    Schedule "1" o-- "*" Activity : merges across pets
