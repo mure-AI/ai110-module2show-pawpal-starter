@@ -9,13 +9,15 @@
 
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
-- ANSWER:the classes i plan to include are
+
+- ANSWER: My UML diagram included 4 main classes: User, Pet, Action, and Schedule. The User owns many pets and a pet has multiple activities which are part of a schedule created by the Schedule class. And finally the User owns or has the main schedule, which is created by the Schedule class. The Pet class is responsible for storing information about each pet, such as its name, activity and a filtered view of its own schedule. It also has a method to add more activities. The Action class handles the various actions that needed to be taken for each pet, including feeding, walks, and medication appointments, along with their associated time constraints or frequencies. The Scheduler class is responsible for managing the overall schedule, ensuring that all actions were organized and displayed correctly for the day.
 
 **b. Design changes**
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
 
+- My coding assistant suggested I store constraints and preferences as dictionary objects because nothing was being done with them in my original design. It also pointed out that multiple classes are affecting my activitiy list and suggested I give the authoritative power to only my Schedule object.
 ---
 
 ## 2. Scheduling Logic and Tradeoffs
