@@ -32,6 +32,7 @@
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
 
+- It redoes the same work more than once instead of saving it. What I mean is that everyday the build_daily_view method runs, it checks for time conflicts twice. I chose this because its a small app and a user can only have a handful of pets so I decided to use code that is easier to understand and safer to use because sorting a short list a few extra times is so fast and won't be noticed.
 ---
 
 ## 3. AI Collaboration

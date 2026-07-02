@@ -9,6 +9,7 @@ Class mapping (UML name -> conceptual role from the spec):
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
@@ -28,6 +29,7 @@ class Activity:
     duration_minutes: int = 15
     category: str = "general"
     frequency: str = "daily"  # e.g. "once", "daily", "weekly"
+    start_date: date | None = None  # anchor date for "once"/"weekly" recurrence
     earliest: time | None = None
     latest: time | None = None
     is_fixed: bool = False
@@ -36,6 +38,45 @@ class Activity:
     def mark_complete(self) -> None:
         """Mark this activity as done."""
         self.is_complete = True
+
+    def next_occurrence(self) -> "Activity | None":
+        """Build the next recurring instance of this activity, or ``None``.
+
+        Only ``daily`` (+1 day) and ``weekly`` (+7 days) recur; ``once`` and
+        any other frequency return ``None``. The clone keeps every field but
+        starts pending, with ``start_date`` advanced from this one's date (or
+        today if it has none). Pure: this activity is not mutated, and the
+        clone is detached from any pet/schedule so the caller decides where it
+        lives.
+        """
+        interval = {"daily": timedelta(days=1), "weekly": timedelta(weeks=1)}.get(
+            self.frequency
+        )
+        if interval is None:
+            return None
+
+        nxt = copy.copy(self)
+        nxt.is_complete = False
+        nxt.start_date = (self.start_date or date.today()) + interval
+        return nxt
+
+    def occurs_on(self, day: date) -> bool:
+        """Return True if this activity should appear on ``day``.
+
+        ``daily`` always occurs. ``weekly`` recurs on the weekday of its
+        ``start_date``. ``once`` occurs only on its ``start_date``. With no
+        ``start_date`` set, the activity always occurs (so simple demos that
+        omit a date still show every task).
+        """
+        if self.frequency == "daily":
+            return True
+        if self.start_date is None:
+            return True
+        if self.frequency == "weekly":
+            return day.weekday() == self.start_date.weekday()
+        if self.frequency == "once":
+            return day == self.start_date
+        return True
 
     @property
     def end_time(self) -> time | None:
@@ -52,6 +93,12 @@ class Activity:
         return self.start_time < other.end_time and other.start_time < self.end_time
 
     def __str__(self) -> str:
+        """Return a one-line summary: status glyph, time, name, and details.
+
+        Shows ``✓``/``○`` for done/pending, the start time as ``HH:MM`` (or
+        ``unscheduled`` when unset), the owning pet's name (or ``—`` when
+        detached), the duration, and the priority as ``p{n}``.
+        """
         when = self.start_time.strftime("%H:%M") if self.start_time else "unscheduled"
         status = "✓" if self.is_complete else "○"
         pet_name = self.pet.name if self.pet else "—"
@@ -101,6 +148,131 @@ class Schedule:
         if activity not in self.activities:
             self.activities.append(activity)
 
+    def complete(self, activity: Activity) -> Activity | None:
+        """Mark ``activity`` done and auto-schedule its next occurrence.
+
+        For ``daily``/``weekly`` activities this spawns the next instance via
+        ``Activity.next_occurrence`` and attaches it to the same pet (if any)
+        and to this schedule, mirroring ``User.add_activity``. Returns the new
+        instance, or ``None`` for non-recurring activities.
+        """
+        activity.mark_complete()
+        nxt = activity.next_occurrence()
+        if nxt is None:
+            return None
+        if nxt.pet is not None:
+            nxt.pet.activities.append(nxt)
+        self.add_activity(nxt)
+        return nxt
+
+    def by_time(self, activities: list[Activity] | None = None) -> list[Activity]:
+        """Return activities sorted by start time, completed ones last.
+
+        Unscheduled activities (no ``start_time``) sort to the bottom. Among
+        activities at the same time, pending sorts before complete. Pure: the
+        input is not mutated.
+        """
+        source = self.activities if activities is None else activities
+        return sorted(
+            source,
+            key=lambda a: (a.start_time or time.max, a.is_complete),
+        )
+
+    def filter(
+        self,
+        pet: "Pet | None" = None,
+        pet_name: str | None = None,
+        status: str | None = None,
+    ) -> list[Activity]:
+        """Return activities matching ``pet``, ``pet_name``, and/or ``status``.
+
+        ``pet`` matches by identity. ``pet_name`` matches every activity whose
+        pet shares that name — so duplicate pet names all match. ``status``
+        accepts ``"pending"``, ``"complete"``, or ``None`` for all. Pure and
+        composable: ``self.by_time(self.filter(pet_name="Rex", status="pending"))``.
+        """
+        result = self.activities
+        if pet is not None:
+            result = [a for a in result if a.pet is pet]
+        if pet_name is not None:
+            result = [a for a in result if a.pet is not None and a.pet.name == pet_name]
+        if status == "pending":
+            result = [a for a in result if not a.is_complete]
+        elif status == "complete":
+            result = [a for a in result if a.is_complete]
+        return list(result)
+
+    def active_for_day(self) -> list[Activity]:
+        """Activities whose recurrence places them on this schedule's day."""
+        return [a for a in self.activities if a.occurs_on(self.day)]
+
+    def detect_conflicts(self) -> list[tuple[Activity, Activity]]:
+        """Return pairs of scheduled activities whose times overlap.
+
+        Read-only: a time-ordered sweep that tracks the running latest end so
+        each activity is compared against every earlier overlapping one, not
+        just its immediate predecessor. Unlike ``resolve_conflicts`` it never
+        mutates — callers can surface conflicts without shifting any times.
+        """
+        ordered = self.by_time([a for a in self.activities if a.start_time is not None])
+        conflicts: list[tuple[Activity, Activity]] = []
+        active: list[Activity] = []
+        for activity in ordered:
+            active = [a for a in active if a.end_time and a.end_time > activity.start_time]
+            for earlier in active:
+                conflicts.append((earlier, activity))
+            active.append(activity)
+        return conflicts
+
+    def conflicts_by_pet(
+        self,
+    ) -> tuple[list[tuple[Activity, Activity]], list[tuple[Activity, Activity]]]:
+        """Split overlapping pairs into same-pet and cross-pet conflicts.
+
+        Returns ``(same_pet, cross_pet)``. A same-pet conflict is impossible
+        for one pet to honor (it can't be two places at once); a cross-pet
+        conflict only matters to the owner's own time. Pairs with an
+        unassigned pet on either side count as cross-pet. Builds on
+        ``detect_conflicts`` so the overlap logic lives in one place.
+        """
+        same_pet: list[tuple[Activity, Activity]] = []
+        cross_pet: list[tuple[Activity, Activity]] = []
+        for earlier, later in self.detect_conflicts():
+            if earlier.pet is not None and earlier.pet is later.pet:
+                same_pet.append((earlier, later))
+            else:
+                cross_pet.append((earlier, later))
+        return same_pet, cross_pet
+
+    def conflict_warning(self) -> str:
+        """Return a human-readable warning about time conflicts, or ``""``.
+
+        A lightweight, never-raising summary meant for printing: empty string
+        when nothing overlaps, otherwise one ``⚠`` line per clashing pair with
+        same-pet conflicts (the ones a single pet can't honor) listed first.
+        Callers can guard with ``if msg := schedule.conflict_warning():``.
+        """
+        same_pet, cross_pet = self.conflicts_by_pet()
+        if not same_pet and not cross_pet:
+            return ""
+
+        def when(activity: Activity) -> str:
+            return activity.start_time.strftime("%H:%M") if activity.start_time else "??:??"
+
+        def line(earlier: Activity, later: Activity, kind: str) -> str:
+            return (
+                f"  ⚠ {kind}: {earlier.name} ({when(earlier)}) overlaps "
+                f"{later.name} ({when(later)})"
+            )
+
+        total = len(same_pet) + len(cross_pet)
+        lines = [f"{total} scheduling conflict{'s' if total != 1 else ''} found:"]
+        for earlier, later in same_pet:
+            lines.append(line(earlier, later, f"same pet ({earlier.pet.name})"))
+        for earlier, later in cross_pet:
+            lines.append(line(earlier, later, "different pets"))
+        return "\n".join(lines)
+
     def prioritize(self) -> list[Activity]:
         """Return activities ordered for the day.
 
@@ -145,10 +317,10 @@ class Schedule:
         for priority and fixed-time activities.
         """
         self.resolve_conflicts()
-        ordered = sorted(
-            self.activities,
-            key=lambda a: (a.start_time or time.max, a.is_complete),
-        )
+        ordered = self.by_time(self.active_for_day())
+
+        # Any activity still overlapping another after resolution is flagged.
+        conflicting = {id(a) for pair in self.detect_conflicts() for a in pair}
 
         weekday = self.day.strftime("%A, %B %-d, %Y")
         header = f"PawPal+ plan — {weekday}"
@@ -166,7 +338,11 @@ class Schedule:
         cat_w = max(len(a.category) for a in ordered)
 
         for activity in ordered:
-            lines.append(self._format_row(activity, name_w, pet_w, cat_w))
+            lines.append(
+                self._format_row(
+                    activity, name_w, pet_w, cat_w, id(activity) in conflicting
+                )
+            )
 
         done = sum(1 for a in ordered if a.is_complete)
         todo = len(ordered) - done
@@ -185,7 +361,8 @@ class Schedule:
         higher-priority activities lead, completed ones sink to the bottom.
         """
         self.resolve_conflicts()
-        ordered = self.prioritize()
+        active = self.active_for_day()
+        ordered = [a for a in self.prioritize() if a in active]
         lines = [f"PawPal+ plan for {self.day.isoformat()}:"]
         if not ordered:
             lines.append("  (nothing scheduled)")
@@ -196,7 +373,13 @@ class Schedule:
         return "\n".join(lines)
 
     @staticmethod
-    def _format_row(activity: Activity, name_w: int, pet_w: int, cat_w: int) -> str:
+    def _format_row(
+        activity: Activity,
+        name_w: int,
+        pet_w: int,
+        cat_w: int,
+        has_conflict: bool = False,
+    ) -> str:
         """Format one activity as an aligned agenda row for ``build_daily_view``."""
         if activity.start_time is None:
             when = "  unscheduled  "
@@ -214,6 +397,8 @@ class Schedule:
             tags.append("★ high")
         if activity.is_fixed:
             tags.append("📌 fixed")
+        if has_conflict:
+            tags.append("⚠ conflict")
         tag_str = ("  " + "  ".join(tags)) if tags else ""
 
         return (
