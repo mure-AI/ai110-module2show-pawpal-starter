@@ -58,19 +58,36 @@ PawPal+ plan — Tuesday, June 30, 2026
 
 ## 🧪 Testing PawPal+
 
+Run the full test suite from the project root:
+
 ```bash
-# Run the full test suite:
-pytest
-
-# Run with coverage:
-pytest --cov
+python -m pytest
 ```
 
-Sample test output:
+The tests in [tests/test_pawpal.py](tests/test_pawpal.py) cover the core scheduling behaviors:
+
+- **Basics** — `mark_complete()` flips a task's status; adding a task grows the pet's task list.
+- **Sorting correctness** — `Schedule.by_time()` returns tasks in chronological order and pushes unscheduled tasks (no `start_time`) to the bottom.
+- **Recurrence logic** — completing a `daily` task spawns one pending instance for the next day (attached once to both pet and schedule), while a `once` task spawns nothing.
+- **Conflict detection** — overlapping time windows are flagged as a pair, and back-to-back tasks (end == next start) are correctly *not* flagged.
+
+Successful test run:
 
 ```
-# Paste your pytest output here
+============================= test session starts ==============================
+platform darwin -- Python 3.13.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/asunke/Documents/Code files/CodePath/A110/Module_2/ai110-module2show-pawpal-starter
+plugins: anyio-4.14.0
+collected 8 items
+
+tests/test_pawpal.py ........                                            [100%]
+
+============================== 8 passed in 0.01s ===============================
 ```
+
+### Confidence Level: ★★★★☆ (4 / 5)
+
+All 8 tests pass and they exercise the trickiest logic — chronological sorting, daily recurrence spawning, and overlap detection including the strict-boundary edge case. Docking one star because coverage is not yet exhaustive: `weekly` recurrence, `resolve_conflicts()` (fixed tasks + `latest` bounds), cascading/transitive conflicts, and the priority-ordered view (`prioritize()`) are documented but not yet directly tested.
 
 ## 📐 Smarter Scheduling
 
