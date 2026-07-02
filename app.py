@@ -110,9 +110,52 @@ if st.button("Generate schedule"):
             )
             owner.add_activity(pet, task)
 
-        if view_mode.startswith("By time"):
-            plan = schedule.build_daily_view()
-        else:
-            plan = schedule.build_priority_view()
+        # Resolve movable overlaps before displaying, mirroring the views.
+        schedule.resolve_conflicts()
 
-        st.code(plan)
+        # Surface any remaining conflicts using the Scheduler's own detection.
+        warning = schedule.conflict_warning()
+        if warning:
+            st.warning(warning)
+        else:
+            st.success("No scheduling conflicts — this plan is clear! 🎉")
+
+        # Choose the ordering method based on the selected view.
+        active = schedule.active_for_day()
+        if view_mode.startswith("By time"):
+            ordered = schedule.by_time(active)
+        else:
+            ordered = [a for a in schedule.prioritize() if a in active]
+
+        if not ordered:
+            st.info("Nothing scheduled for today.")
+        else:
+            # Flag activities that still overlap another after resolution.
+            conflicting = {id(a) for pair in schedule.detect_conflicts() for a in pair}
+
+            rows = []
+            for a in ordered:
+                start = a.start_time.strftime("%H:%M") if a.start_time else "—"
+                end = a.end_time.strftime("%H:%M") if a.end_time else "—"
+                rows.append(
+                    {
+                        "Time": f"{start} – {end}",
+                        "Task": a.name,
+                        "Pet": a.pet.name if a.pet else "—",
+                        "Priority": "★ high" if a.priority >= 3 else ("low" if a.priority <= 1 else "medium"),
+                        "Status": "✓ done" if a.is_complete else "○ pending",
+                        "Conflict": "⚠️" if id(a) in conflicting else "",
+                        "Why": Schedule._explain(a),
+                    }
+                )
+
+            st.markdown(f"#### 📅 Plan for {schedule.day.strftime('%A, %B %d, %Y')}")
+            st.table(rows)
+
+            # Quick summary line, professional and at-a-glance.
+            done = sum(1 for a in ordered if a.is_complete)
+            pets = len({id(a.pet) for a in ordered if a.pet})
+            st.caption(
+                f"{len(ordered)} tasks across {pets} pet(s) · "
+                f"{done} done, {len(ordered) - done} to go"
+            )

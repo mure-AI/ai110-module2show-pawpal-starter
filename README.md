@@ -22,6 +22,21 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## ✨ Features
+
+The algorithms implemented in [pawpal_system.py](pawpal_system.py) (see [Smarter Scheduling](#-smarter-scheduling) for method-level detail):
+
+- **Sorting by time** — orders tasks chronologically, pushing unscheduled tasks to the bottom and completed ones last.
+- **Priority ordering** — ranks by fixed-time first, then higher priority, then earliest start time, sinking completed tasks.
+- **Conflict detection** — a time-ordered sweep that flags *every* overlapping pair of tasks, not just adjacent ones.
+- **Same-pet vs. cross-pet conflicts** — separates overlaps a single pet can't honor from ones that only compete for the owner's time.
+- **Conflict warnings** — a readable ⚠ summary listing each clashing pair, same-pet conflicts first.
+- **Automatic conflict resolution** — pushes movable tasks to start when the previous one ends (respecting each task's `latest` bound); fixed tasks never move.
+- **Daily & weekly recurrence** — completing a recurring task auto-spawns its next instance (+1 day / +7 days); `once` tasks spawn nothing.
+- **Day-aware filtering** — shows only the tasks that occur on a given day (daily always, weekly by weekday, once on its exact date).
+- **Filter by pet & status** — composable filtering by pet identity, pet name, or pending/complete status.
+- **Two plan views** — a time-ordered daily agenda and a priority-ordered plan that explains why each task is placed where it is.
+
 ## Getting started
 
 ### Setup
@@ -129,12 +144,91 @@ Two orderings are offered so the same set of tasks can be viewed either as an ag
 
 ## 📸 Demo Walkthrough
 
-Describe your app in numbered steps so a reader can follow along without watching a video:
+### What you can do in the app
 
-1. <!-- Describe this step -->
-2. <!-- Describe this step -->
-3. <!-- Describe this step -->
-4. <!-- Describe this step -->
-5. <!-- Add more steps as needed -->
+The Streamlit UI ([app.py](app.py)) is a single interactive page:
+
+- **Enter owner & pet info** — set the owner name, pet name, and species (dog / cat / other).
+- **Add tasks** — for each task, enter a title, duration (minutes), priority (low / medium / high), and start time, then click **Add task**. Added tasks appear in a running table.
+- **Pick a view** — toggle between **By time (daily agenda)** and **By priority (with reasoning)**.
+- **Generate the schedule** — click **Generate schedule** to run the tasks through the `Schedule` brain and render the organized plan.
+
+### Example workflow
+
+1. Set the owner to `Jordan` and the pet to `Mochi` (a dog).
+2. Add **Morning walk** — 20 min, high priority, 08:00 — and click **Add task**.
+3. Add **Breakfast** — 15 min, high priority, 08:00 — a second task at the *same* time.
+4. Add **Litter cleanup** — 10 min, low priority, 12:00.
+5. Choose **By time (daily agenda)** and click **Generate schedule**.
+6. Read today's schedule: tasks come back time-ordered in an `st.table`, with a conflict banner above it.
+
+### Scheduler behaviors on display
+
+- **Sorting** — `Schedule.by_time()` returns the tasks chronologically (or `Schedule.prioritize()` in the priority view), so they render in order regardless of the order you added them.
+- **Conflict warnings** — the two 08:00 tasks overlap, so `Schedule.conflict_warning()` surfaces an `st.warning`; a clash-free plan shows an `st.success` instead. Overlapping rows are flagged with a ⚠️ in the table.
+- **Auto-resolution** — `Schedule.resolve_conflicts()` nudges movable tasks to start when the previous one ends (fixed tasks stay put).
+- **Reasoning** — the *Why* column comes from the Scheduler's own `_explain()`, noting fixed time, priority, and frequency.
+- **Summary** — a caption reports totals: tasks, pets, and done-vs-remaining counts.
+
+### Sample CLI output
+
+Running the terminal demo exercises the same `Schedule` logic without Streamlit:
+
+```bash
+python main.py
+```
+
+```
+Tasks as added (insertion order):
+  ○ 18:00 Evening medication (Rex, 10m, p3)
+  ○ 08:00 Breakfast (Luna, 15m, p3)
+  ✓ 07:30 Morning walk (Rex, 30m, p2)
+  ○ 12:00 Litter cleanup (Luna, 10m, p1)
+  ○ 08:00 Breakfast (Rex, 15m, p3)
+
+Sorted by time (by_time):
+  ✓ 07:30 Morning walk (Rex, 30m, p2)
+  ○ 08:00 Breakfast (Luna, 15m, p3)
+  ○ 08:00 Breakfast (Rex, 15m, p3)
+  ○ 12:00 Litter cleanup (Luna, 10m, p1)
+  ○ 18:00 Evening medication (Rex, 10m, p3)
+
+Pending only (filter status='pending'):
+  ○ 08:00 Breakfast (Luna, 15m, p3)
+  ○ 08:00 Breakfast (Rex, 15m, p3)
+  ○ 12:00 Litter cleanup (Luna, 10m, p1)
+  ○ 18:00 Evening medication (Rex, 10m, p3)
+
+Complete only (filter status='complete'):
+  ✓ 07:30 Morning walk (Rex, 30m, p2)
+
+Rex's tasks (filter pet_name='Rex'):
+  ✓ 07:30 Morning walk (Rex, 30m, p2)
+  ○ 08:00 Breakfast (Rex, 15m, p3)
+  ○ 18:00 Evening medication (Rex, 10m, p3)
+
+Luna's pending tasks (filter pet_name='Luna', status='pending'):
+  ○ 08:00 Breakfast (Luna, 15m, p3)
+  ○ 12:00 Litter cleanup (Luna, 10m, p1)
+
+Conflict check (conflict_warning):
+1 scheduling conflict found:
+  ⚠ different pets: Breakfast (08:00) overlaps Breakfast (08:00)
+
+PawPal+ plan — Wednesday, July 1, 2026
+──────────────────────────────────────
+  07:30 – 08:00   Morning walk         Rex    exercise  ✓ done
+  08:00 – 08:15   Breakfast            Luna   feeding   ★ high  ⚠ conflict
+  08:00 – 08:15   Breakfast            Rex    feeding   ★ high  📌 fixed  ⚠ conflict
+  12:00 – 12:10   Litter cleanup       Luna   hygiene 
+  18:00 – 18:10   Evening medication   Rex    health    ★ high  📌 fixed
+──────────────────────────────────────
+  5 tasks across 2 pets · 1 done, 4 to go
+
+Verify: two tasks at the same time
+1 scheduling conflict found:
+  ⚠ same pet (Milo): Feed (09:00) overlaps Vet call (09:00)
+  ✓ Scheduler correctly identified the conflict
+```
 
 **Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->
